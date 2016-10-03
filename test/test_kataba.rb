@@ -1,6 +1,8 @@
 require 'minitest/autorun'
 require 'kataba'
 require 'fileutils'
+require 'yaml'
+require 'open-uri'
 
 class KatabaTest < Minitest::Unit::TestCase
   def test_xsd_return
@@ -21,5 +23,11 @@ class KatabaTest < Minitest::Unit::TestCase
 
   def test_default_directory
     assert Dir.exists?(File.expand_path("..", Kataba.configuration.offline_storage))
+  end
+
+  def test_mirror_list
+    mirror_list = YAML.load_file(Dir.pwd + '/test/fixtures/mirror.yml')
+    assert mirror_list["http://www.loc.gov/standards/mods/v3/mods-3-5.xsd"] == "https://gist.githubusercontent.com/dgcliff/6b7b16438b87008432ce5bb506025339/raw/a792c59b31775e8f7d108f8ec25218e9a65d22c5/mods-3-5.xsd"
+    assert open("http://www.loc.gov/standards/mods/v3/mods-3-5.xsd").read == open("https://gist.githubusercontent.com/dgcliff/6b7b16438b87008432ce5bb506025339/raw/a792c59b31775e8f7d108f8ec25218e9a65d22c5/mods-3-5.xsd").read
   end
 end
