@@ -10,4 +10,7 @@ Gem::Specification.new do |s|
   s.homepage    =
     'http://rubygems.org/gems/kataba'
   s.license       = 'MIT'
+  s.required_ruby_version = '~> 2.0'
+
+  s.add_dependency "nokogiri", '~> 1.6'
 end
