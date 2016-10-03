@@ -17,8 +17,13 @@ module Kataba
     @configuration ||=  Configuration.new
   end
 
+  def self.reset
+    @configuration = Configuration.new
+  end
+
   class Configuration
     attr_accessor :offline_storage
+    attr_accessor :mirror_list
 
     def initialize
       @offline_storage = "#{Dir.tmpdir}/kataba"
@@ -66,7 +71,18 @@ module Kataba
         file_paths << file_path
 
         open(file_path, "wb+") do |file|
-          file.write(open(xsd_uri).read)
+          if !self.configuration.mirror_list.to_s.empty?
+            mirror_list = YAML.load_file(self.configuration.mirror_list)
+            mirror = mirror_list[xsd_uri]
+            if mirror.to_s.empty?
+              # No mirror for that uri
+              file.write(open(xsd_uri).read)
+            else
+              file.write(open(mirror).read)
+            end
+          else
+            file.write(open(xsd_uri).read)
+          end
         end
       end
 
