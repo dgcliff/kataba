@@ -1,4 +1,5 @@
 # Kataba
+[![Gem Version](https://badge.fury.io/rb/kataba.svg)](https://badge.fury.io/rb/kataba)
 
 ## Description
 Kataba (片刃) provides XML Schema Definition (XSD) mirroring and offline validation for Nokogiri
@@ -20,9 +21,11 @@ gem install kataba
 ## Usage
 
 ### Configuration (optional)
-`Kataba.configuration.offline_storage = "/tmp/kataba"`
-`Kataba.configuration.mirror_list = File.join(Rails.root, 'config', 'mirror.yml')`
+```Kataba.configuration.offline_storage = "/tmp/kataba"```
+
+```Kataba.configuration.mirror_list = File.join(Rails.root, 'config', 'mirror.yml')```
 
 ### Download
 The fetch_schema method returns a Nokogiri::XML::Schema object
-`xsd = Kataba.fetch_schema("http://www.loc.gov/standards/mods/v3/mods-3-5.xsd")`
+
+```xsd = Kataba.fetch_schema("http://www.loc.gov/standards/mods/v3/mods-3-5.xsd")```
