@@ -1,9 +1,9 @@
 Gem::Specification.new do |s|
   s.name        = 'kataba'
-  s.version     = '1.0.0'
+  s.version     = '1.0.1'
   s.date        = '2016-10-02'
   s.summary     = "XML Schema Definition (XSD) mirroring and offline validation for Nokogiri"
-  s.description = "A simple gem that allows for the functionality that an XML catalog would provide"
+  s.description = "Kataba allows for mirroring and offline storage of XSD files, to enhance Nokogiri"
   s.authors     = ["David Cliff"]
   s.email       = 'd.cliff@northeastern.edu'
   s.files       = ["lib/kataba.rb"]

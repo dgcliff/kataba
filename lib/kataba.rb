@@ -6,8 +6,16 @@ require 'open-uri'
 module Kataba
 
   class << self
+    # Simple attribute for configuration
     attr_accessor :configuration
   end
+
+  # Allows for configuration by block
+  #
+  # Example:
+  #  MegaLotto.configure do |config|
+  #   config.drawing_count = 10
+  #  end
 
   def self.configure
     yield(configuration) if block_given?
@@ -17,18 +25,44 @@ module Kataba
     @configuration ||=  Configuration.new
   end
 
+  # Undoes any configuration - this method was built for testing purposes
+  #
+  # Example:
+  #   Kataba.reset
+
   def self.reset
     @configuration = Configuration.new
   end
 
   class Configuration
+    # Offline storage is "#{Dir.tmpdir}/kataba" by default.
+    # This attribute allows the user to change that default value.
+    #
+    # Example:
+    #   Kataba.configuration.offline_storage = "/tmp/kataba"
     attr_accessor :offline_storage
+    # The user can optionally provide a mirror list to reduce stress on primary XSD providers.
+    # This attribute allows the user to configure Kataba to use a YAML file with key/value pairs of
+    # original/mirror values. Sample YAML file can be found at https://github.com/dgcliff/kataba/blob/master/test/fixtures/mirror.yml
+    #
+    # Example:
+    #   Kataba.configuration.mirror_list = File.join(Rails.root, 'config', 'mirror.yml')
     attr_accessor :mirror_list
 
+    # Default configuration values
     def initialize
       @offline_storage = "#{Dir.tmpdir}/kataba"
     end
   end
+
+  # If already downloaded, uses offline version. If not, downloads from the URI provided.
+  # If mirror list is configured, searches for mirrored URI instead.
+  #
+  # Example:
+  #   Kataba.fetch_schema("http://www.loc.gov/standards/mods/v3/mods-3-5.xsd")
+  #
+  # Arguments:
+  #   xsd_uri: (String)
 
   def self.fetch_schema(xsd_uri)
     uri_md5 = Digest::MD5.hexdigest(xsd_uri)
