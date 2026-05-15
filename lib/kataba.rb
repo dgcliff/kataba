@@ -66,17 +66,27 @@ module Kataba
     dir_path = "#{self.configuration.offline_storage}"
     xsd_path = "#{dir_path}/#{uri_md5}.xsd"
 
-    # Does the offline version exist already?
-    if !(File.exist?(xsd_path))
-      # If not, go download
-      xsd_array = []
-      xsd_array << xsd_uri
-      download_xsd(xsd_array)
-    end
+    attempts = 0
+    begin
+      # Does the offline version exist already?
+      if !(File.exist?(xsd_path))
+        # If not, go download
+        xsd_array = []
+        xsd_array << xsd_uri
+        download_xsd(xsd_array)
+      end
 
-    # Validate and return Nokogiri schema
-    Dir.chdir(dir_path) do
-      return Nokogiri::XML::Schema(IO.read(xsd_path))
+      # Validate and return Nokogiri schema
+      Dir.chdir(dir_path) do
+        return Nokogiri::XML::Schema(IO.read(xsd_path))
+      end
+    rescue Nokogiri::XML::SyntaxError
+      # Poisoned cache (e.g. a pre-fix install that stored a bad fetch).
+      # Evict the offending file and refetch once.
+      File.delete(xsd_path) if File.exist?(xsd_path)
+      attempts += 1
+      retry if attempts < 2
+      raise
     end
   end
 
@@ -98,10 +108,14 @@ module Kataba
         end
 
         file_path = "#{dir_name}/#{uri_md5}.xsd"
+        tmp_path  = "#{file_path}.part"
 
-        file_paths << file_path
-
-        File.open(file_path, "wb+") do |file|
+        # Write to a .part file first; only rename to the final cache path
+        # after we've confirmed the bytes parse as XML. Without this, a
+        # malformed response (HTML error page, truncated TCP stream, captive
+        # portal stub) would land at the canonical cache path and poison
+        # every subsequent fetch.
+        File.open(tmp_path, "wb+") do |file|
           if !self.configuration.mirror_list.to_s.empty?
             mirror_list = YAML.load_file(self.configuration.mirror_list)
             mirror = mirror_list[xsd_uri]
@@ -115,6 +129,16 @@ module Kataba
             file.write(URI.open(xsd_uri).read)
           end
         end
+
+        begin
+          Nokogiri::XML(File.read(tmp_path)) { |c| c.strict }
+        rescue Nokogiri::XML::SyntaxError
+          File.delete(tmp_path)
+          raise
+        end
+
+        File.rename(tmp_path, file_path)
+        file_paths << file_path
       end
 
       # Search inside for other schemaLocations

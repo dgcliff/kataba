@@ -84,4 +84,35 @@ class KatabaTest < Minitest::Test
 
     assert_raises(OpenURI::HTTPError) { Kataba.fetch_schema(MODS_URI) }
   end
+
+  # Regression: a malformed response (HTML error page, truncated stream,
+  # garbage proxy stub) must not land at the canonical cache path. Without
+  # the temp-write + parse-check, the bad bytes would poison the cache and
+  # every subsequent fetch_schema would re-explode on the same content.
+  def test_malformed_response_does_not_poison_cache
+    bad_url = "http://example.com/malformed.xsd"
+    stub_request(:get, bad_url).to_return(status: 200, body: "this is not xml at all")
+
+    assert_raises(Nokogiri::XML::SyntaxError) { Kataba.fetch_schema(bad_url) }
+
+    md5 = Digest::MD5.hexdigest(bad_url)
+    storage = Kataba.configuration.offline_storage
+    refute File.exist?("#{storage}/#{md5}.xsd"),     "final cache file should not exist after a malformed fetch"
+    refute File.exist?("#{storage}/#{md5}.xsd.part"), ".part file should be cleaned up after a malformed fetch"
+  end
+
+  # Regression: if a cached XSD is somehow already corrupt on disk (e.g. a
+  # pre-fix install that wrote one before this guard existed), fetch_schema
+  # should evict it and refetch once rather than failing in perpetuity.
+  def test_self_heals_pre_existing_malformed_cache
+    storage = Kataba.configuration.offline_storage
+    FileUtils.mkdir_p(storage)
+    md5 = Digest::MD5.hexdigest(MODS_URI)
+    poisoned_path = "#{storage}/#{md5}.xsd"
+    File.write(poisoned_path, "this is not xml at all")
+
+    assert_kind_of Nokogiri::XML::Schema, Kataba.fetch_schema(MODS_URI)
+    # The healed cache parses cleanly now
+    Nokogiri::XML(File.read(poisoned_path)) { |c| c.strict }
+  end
 end
