@@ -2,13 +2,10 @@ require 'nokogiri'
 require 'tmpdir'
 require 'digest/md5'
 require 'open-uri'
+require 'fileutils'
+require 'yaml'
 
 module Kataba
-
-  class << self
-    # Simple attribute for configuration
-    attr_accessor :configuration
-  end
 
   # Allows for configuration by block
   #
@@ -70,7 +67,7 @@ module Kataba
     xsd_path = "#{dir_path}/#{uri_md5}.xsd"
 
     # Does the offline version exist already?
-    if !(File.exists?(xsd_path))
+    if !(File.exist?(xsd_path))
       # If not, go download
       xsd_array = []
       xsd_array << xsd_uri
@@ -104,18 +101,18 @@ module Kataba
 
         file_paths << file_path
 
-        open(file_path, "wb+") do |file|
+        File.open(file_path, "wb+") do |file|
           if !self.configuration.mirror_list.to_s.empty?
             mirror_list = YAML.load_file(self.configuration.mirror_list)
             mirror = mirror_list[xsd_uri]
             if mirror.to_s.empty?
               # No mirror for that uri
-              file.write(open(xsd_uri).read)
+              file.write(URI.open(xsd_uri).read)
             else
-              file.write(open(mirror).read)
+              file.write(URI.open(mirror).read)
             end
           else
-            file.write(open(xsd_uri).read)
+            file.write(URI.open(xsd_uri).read)
           end
         end
       end
