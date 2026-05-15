@@ -1,6 +1,6 @@
 Gem::Specification.new do |s|
   s.name        = 'kataba'
-  s.version     = '1.0.2'
+  s.version     = '1.0.3'
   s.date        = '2026-05-15'
   s.summary     = "XML Schema Definition (XSD) mirroring and offline validation for Nokogiri"
   s.description = "Kataba allows for mirroring and offline storage of XSD files, to enhance Nokogiri"
