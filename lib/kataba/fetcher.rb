@@ -12,12 +12,23 @@ module Kataba
   #     consumer already trusted this host by putting it in their
   #     schemaLocation. Cross-origin downgrades stay refused — that's
   #     the actual DNS-redirect attack vector.
+  #   - /mods/xml.xsd vanity path: rewrite to /standards/mods/xml.xsd
+  #     before the first request. LoC publishes the file only at the
+  #     canonical /standards path; the vanity path redirects HTTPS->HTTP
+  #     and 503s. Applied here so transitive xs:import resolution from
+  #     mods-3-N.xsd benefits, not just top-level fetch_schema calls.
   #
   # mirror_list remains the consumer's backstop for URI-identity
   # changes (path renames, host moves) that no delivery heuristic
   # can rescue.
   class Fetcher
     MAX_REDIRECTS = 5
+
+    # LoC publishes xml.xsd only at /standards/mods/xml.xsd; the /mods/xml.xsd
+    # path used in every mods-3-N.xsd xs:import 503s after a scheme bounce.
+    VANITY_PATH_REWRITES = {
+      '/mods/xml.xsd' => '/standards/mods/xml.xsd',
+    }.freeze
 
     class FetchError < StandardError; end
 
@@ -26,10 +37,18 @@ module Kataba
     end
 
     def fetch
-      attempt(@original_uri, alt_scheme_retry: true)
+      attempt(normalize(@original_uri), alt_scheme_retry: true)
     end
 
     private
+
+    def normalize(uri)
+      VANITY_PATH_REWRITES.each do |from, to|
+        rewritten = uri.sub(%r{(\Ahttps?://[^/]+)#{Regexp.escape(from)}\z}i, "\\1#{to}")
+        return rewritten unless rewritten == uri
+      end
+      uri
+    end
 
     def attempt(uri, alt_scheme_retry:)
       response = request_with_redirects(uri, redirect_depth: 0)
