@@ -3,7 +3,6 @@ require 'webmock/minitest'
 require 'kataba'
 require 'fileutils'
 require 'yaml'
-require 'open-uri'
 require 'nokogiri'
 
 class KatabaTest < Minitest::Test
@@ -82,7 +81,7 @@ class KatabaTest < Minitest::Test
 
     Kataba.configuration.mirror_list = Dir.pwd + '/test/fixtures/bad_mirror.yml'
 
-    assert_raises(OpenURI::HTTPError) { Kataba.fetch_schema(MODS_URI) }
+    assert_raises(Kataba::Fetcher::FetchError) { Kataba.fetch_schema(MODS_URI) }
   end
 
   # Regression: a malformed response (HTML error page, truncated stream,
@@ -114,5 +113,98 @@ class KatabaTest < Minitest::Test
     assert_kind_of Nokogiri::XML::Schema, Kataba.fetch_schema(MODS_URI)
     # The healed cache parses cleanly now
     Nokogiri::XML(File.read(poisoned_path)) { |c| c.strict }
+  end
+
+  # Minimal XSD body for fetcher tests — valid XML, valid XSD, no nested
+  # schemaLocations (so download_xsd doesn't recurse).
+  MINIMAL_XSD = <<~XSD
+    <?xml version="1.0"?>
+    <xs:schema xmlns:xs="http://www.w3.org/2001/XMLSchema">
+      <xs:element name="root" type="xs:string"/>
+    </xs:schema>
+  XSD
+
+  # Row 1 of the deployment-quirk table: HTTP 503 (Cloudflare bot
+  # management), HTTPS 200. The fetcher retries on the alternate scheme.
+  def test_fetcher_retries_on_alt_scheme_after_5xx
+    http_url  = "http://example.com/mods.xsd"
+    https_url = "https://example.com/mods.xsd"
+
+    stub_request(:get, http_url).to_return(status: 503)
+    stub_request(:get, https_url).to_return(status: 200, body: MINIMAL_XSD)
+
+    assert_kind_of Nokogiri::XML::Schema, Kataba.fetch_schema(http_url)
+    assert_requested :get, http_url
+    assert_requested :get, https_url
+  end
+
+  # Row 2: a same-origin HTTPS->HTTP 301 (the xml.xsd vanity URL pattern).
+  # open-uri refuses this with RuntimeError; the fetcher follows it because
+  # the consumer's trust is in the origin and this is the origin's own call.
+  def test_fetcher_follows_same_origin_https_to_http_redirect
+    https_url = "https://example.com/xml.xsd"
+    http_url  = "http://example.com/xml.xsd"
+
+    stub_request(:get, https_url).to_return(status: 301, headers: { "Location" => http_url })
+    stub_request(:get, http_url).to_return(status: 200, body: MINIMAL_XSD)
+
+    assert_kind_of Nokogiri::XML::Schema, Kataba.fetch_schema(https_url)
+    assert_requested :get, https_url
+    assert_requested :get, http_url
+  end
+
+  # Cross-origin HTTPS->HTTP redirect is the actual downgrade-attack
+  # vector (DNS-controlled redirect to attacker plaintext). Fetcher
+  # refuses BEFORE issuing the downgraded request.
+  def test_fetcher_refuses_cross_origin_https_to_http_redirect
+    https_url = "https://a.example.com/x.xsd"
+    evil_url  = "http://b.example.com/x.xsd"
+
+    stub_request(:get, https_url).to_return(status: 301, headers: { "Location" => evil_url })
+
+    assert_raises(Kataba::Fetcher::FetchError) { Kataba.fetch_schema(https_url) }
+    assert_not_requested :get, evil_url
+  end
+
+  # A redirect loop must terminate. MAX_REDIRECTS = 5; a self-redirect
+  # exhausts the cap and raises rather than running forever.
+  def test_fetcher_caps_redirect_chain
+    url = "https://example.com/loop.xsd"
+    stub_request(:get, url).to_return(status: 301, headers: { "Location" => url })
+
+    assert_raises(Kataba::Fetcher::FetchError) { Kataba.fetch_schema(url) }
+  end
+
+  # Happy path: a clean 200 doesn't trigger any speculative alt-scheme
+  # retry. The original was fine; don't waste round trips.
+  def test_fetcher_no_speculative_retry_on_success
+    url     = "https://example.com/clean.xsd"
+    alt_url = "http://example.com/clean.xsd"
+
+    stub_request(:get, url).to_return(status: 200, body: MINIMAL_XSD)
+
+    Kataba.fetch_schema(url)
+
+    assert_requested :get, url, times: 1
+    assert_not_requested :get, alt_url
+  end
+
+  # Regression: when the network fetch raises (vs. returns malformed
+  # bytes), the cache directory must not be left with an orphaned 0-byte
+  # .part file. With the fetch-before-open refactor, the .part is never
+  # created on fetch failure.
+  def test_no_orphaned_part_file_on_fetch_error
+    http_url  = "http://example.com/dead.xsd"
+    https_url = "https://example.com/dead.xsd"
+
+    stub_request(:get, http_url).to_return(status: 503)
+    stub_request(:get, https_url).to_return(status: 503)
+
+    assert_raises(Kataba::Fetcher::FetchError) { Kataba.fetch_schema(http_url) }
+
+    md5 = Digest::MD5.hexdigest(http_url)
+    storage = Kataba.configuration.offline_storage
+    refute File.exist?("#{storage}/#{md5}.xsd"),      "final cache file should not exist after fetch failure"
+    refute File.exist?("#{storage}/#{md5}.xsd.part"), ".part file should not be orphaned after fetch failure"
   end
 end

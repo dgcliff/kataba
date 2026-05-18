@@ -1,9 +1,9 @@
 require 'nokogiri'
 require 'tmpdir'
 require 'digest/md5'
-require 'open-uri'
 require 'fileutils'
 require 'yaml'
+require 'kataba/fetcher'
 
 module Kataba
 
@@ -110,25 +110,24 @@ module Kataba
         file_path = "#{dir_name}/#{uri_md5}.xsd"
         tmp_path  = "#{file_path}.part"
 
+        # Resolve mirror first, if configured, then fetch. Fetching BEFORE
+        # opening tmp_path means a failed network fetch can't leave an
+        # orphaned 0-byte .part on disk — the file simply isn't created.
+        fetch_uri = xsd_uri
+        if !self.configuration.mirror_list.to_s.empty?
+          mirror_list = YAML.load_file(self.configuration.mirror_list)
+          mirror = mirror_list[xsd_uri]
+          fetch_uri = mirror unless mirror.to_s.empty?
+        end
+
+        body = Kataba::Fetcher.new(fetch_uri).fetch
+
         # Write to a .part file first; only rename to the final cache path
         # after we've confirmed the bytes parse as XML. Without this, a
         # malformed response (HTML error page, truncated TCP stream, captive
         # portal stub) would land at the canonical cache path and poison
         # every subsequent fetch.
-        File.open(tmp_path, "wb+") do |file|
-          if !self.configuration.mirror_list.to_s.empty?
-            mirror_list = YAML.load_file(self.configuration.mirror_list)
-            mirror = mirror_list[xsd_uri]
-            if mirror.to_s.empty?
-              # No mirror for that uri
-              file.write(URI.open(xsd_uri).read)
-            else
-              file.write(URI.open(mirror).read)
-            end
-          else
-            file.write(URI.open(xsd_uri).read)
-          end
-        end
+        File.open(tmp_path, "wb+") { |file| file.write(body) }
 
         begin
           Nokogiri::XML(File.read(tmp_path)) { |c| c.strict }
