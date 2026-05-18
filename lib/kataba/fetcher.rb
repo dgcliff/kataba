@@ -12,11 +12,12 @@ module Kataba
   #     consumer already trusted this host by putting it in their
   #     schemaLocation. Cross-origin downgrades stay refused — that's
   #     the actual DNS-redirect attack vector.
-  #   - /mods/xml.xsd vanity path: rewrite to /standards/mods/xml.xsd
-  #     before the first request. LoC publishes the file only at the
-  #     canonical /standards path; the vanity path redirects HTTPS->HTTP
-  #     and 503s. Applied here so transitive xs:import resolution from
-  #     mods-3-N.xsd benefits, not just top-level fetch_schema calls.
+  #   - /mods/xml.xsd: rewrite to /standards/mods/xml.xsd before the
+  #     first request. The /mods/xml.xsd path is what every mods-3-N.xsd
+  #     embeds in its xs:import, but LoC only serves the file from
+  #     /standards/mods/xml.xsd today — the embedded path bounces
+  #     HTTPS->HTTP and 503s. Applied here so transitive xs:import
+  #     resolution benefits, not just top-level fetch_schema calls.
   #
   # mirror_list remains the consumer's backstop for URI-identity
   # changes (path renames, host moves) that no delivery heuristic
@@ -24,9 +25,10 @@ module Kataba
   class Fetcher
     MAX_REDIRECTS = 5
 
-    # LoC publishes xml.xsd only at /standards/mods/xml.xsd; the /mods/xml.xsd
-    # path used in every mods-3-N.xsd xs:import 503s after a scheme bounce.
-    VANITY_PATH_REWRITES = {
+    # Map from a path that's embedded in published schemas but no longer
+    # serves the file, to the path that does. xml.xsd: every mods-3-N.xsd
+    # imports /mods/xml.xsd, but only /standards/mods/xml.xsd serves it.
+    PATH_REWRITES = {
       '/mods/xml.xsd' => '/standards/mods/xml.xsd',
     }.freeze
 
@@ -43,7 +45,7 @@ module Kataba
     private
 
     def normalize(uri)
-      VANITY_PATH_REWRITES.each do |from, to|
+      PATH_REWRITES.each do |from, to|
         rewritten = uri.sub(%r{(\Ahttps?://[^/]+)#{Regexp.escape(from)}\z}i, "\\1#{to}")
         return rewritten unless rewritten == uri
       end

@@ -10,11 +10,11 @@ class KatabaTest < Minitest::Test
 
   MODS_URI  = "http://www.loc.gov/standards/mods/v3/mods-3-5.xsd"
   XLINK_URI = "http://www.loc.gov/standards/xlink/xlink.xsd"
-  # The vanity URL appears in every mods-3-N.xsd's xs:import. The Fetcher
-  # rewrites it to the canonical /standards path before the request, since
-  # LoC only serves the file from there.
-  XML_URI            = "http://www.loc.gov/mods/xml.xsd"
-  XML_CANONICAL_URI  = "http://www.loc.gov/standards/mods/xml.xsd"
+  # XML_URI is the path embedded in every mods-3-N.xsd's xs:import.
+  # XML_REWRITTEN_URI is where LoC actually serves the file today; the
+  # Fetcher rewrites embedded -> rewritten before issuing any request.
+  XML_URI           = "http://www.loc.gov/mods/xml.xsd"
+  XML_REWRITTEN_URI = "http://www.loc.gov/standards/mods/xml.xsd"
 
   MIRROR_MODS  = "https://raw.githubusercontent.com/dgcliff/kataba/master/test/fixtures/mods-3-5.xsd"
   MIRROR_XLINK = "https://raw.githubusercontent.com/dgcliff/kataba/master/test/fixtures/xlink.xsd"
@@ -27,12 +27,12 @@ class KatabaTest < Minitest::Test
     # Reset so each test gets clean assert_(not_)requested counts.
     WebMock.reset!
 
-    # Stub canonical LoC URLs (used when no mirror is configured). xml.xsd
-    # is stubbed at the /standards path because the Fetcher rewrites the
-    # vanity /mods/xml.xsd path before issuing the request.
+    # Stub the LoC URLs the Fetcher will actually request when no mirror
+    # is configured. xml.xsd is stubbed at the /standards path because
+    # the Fetcher rewrites /mods/xml.xsd before issuing the request.
     stub_request(:get, MODS_URI).to_return(status: 200, body: File.read("#{FIXTURE_DIR}/mods-3-5.xsd"))
     stub_request(:get, XLINK_URI).to_return(status: 200, body: File.read("#{FIXTURE_DIR}/xlink.xsd"))
-    stub_request(:get, XML_CANONICAL_URI).to_return(status: 200, body: File.read("#{FIXTURE_DIR}/xml.xsd"))
+    stub_request(:get, XML_REWRITTEN_URI).to_return(status: 200, body: File.read("#{FIXTURE_DIR}/xml.xsd"))
 
     # Stub mirror URLs (used when mirror_list is configured)
     stub_request(:get, MIRROR_MODS).to_return(status: 200, body: File.read("#{FIXTURE_DIR}/mods-3-5.xsd"))
@@ -154,9 +154,10 @@ class KatabaTest < Minitest::Test
     assert_requested :get, https_url
   end
 
-  # Row 2: a same-origin HTTPS->HTTP 301 (the xml.xsd vanity URL pattern).
-  # open-uri refuses this with RuntimeError; the fetcher follows it because
-  # the consumer's trust is in the origin and this is the origin's own call.
+  # Row 2: a same-origin HTTPS->HTTP 301 (the redirect shape the xml.xsd
+  # path used to bounce through). open-uri refuses this with RuntimeError;
+  # the fetcher follows it because the consumer's trust is in the origin
+  # and this is the origin's own call.
   def test_fetcher_follows_same_origin_https_to_http_redirect
     https_url = "https://example.com/xml.xsd"
     http_url  = "http://example.com/xml.xsd"
@@ -205,34 +206,35 @@ class KatabaTest < Minitest::Test
     assert_not_requested :get, alt_url
   end
 
-  # LoC vanity-path rewrite: every mods-3-N.xsd does an xs:import of
+  # /mods/xml.xsd rewrite: every mods-3-N.xsd does an xs:import of
   # http://www.loc.gov/mods/xml.xsd, but LoC only serves the file from
-  # /standards/mods/xml.xsd — the vanity path redirects HTTPS->HTTP and
-  # 503s. The Fetcher rewrites the path before any request, so transitive
-  # import resolution actually reaches the file.
-  def test_fetcher_rewrites_loc_mods_xml_vanity_path
-    vanity_url    = "http://www.loc.gov/mods/xml.xsd"
-    canonical_url = "http://www.loc.gov/standards/mods/xml.xsd"
+  # /standards/mods/xml.xsd today — the embedded path redirects
+  # HTTPS->HTTP and 503s. The Fetcher rewrites the path before any
+  # request, so transitive import resolution actually reaches the file.
+  def test_fetcher_rewrites_loc_mods_xml_path
+    embedded_url  = "http://www.loc.gov/mods/xml.xsd"
+    rewritten_url = "http://www.loc.gov/standards/mods/xml.xsd"
 
-    stub_request(:get, canonical_url).to_return(status: 200, body: MINIMAL_XSD)
+    stub_request(:get, rewritten_url).to_return(status: 200, body: MINIMAL_XSD)
 
-    assert_kind_of Nokogiri::XML::Schema, Kataba.fetch_schema(vanity_url)
-    assert_requested :get, canonical_url
-    assert_not_requested :get, vanity_url
+    assert_kind_of Nokogiri::XML::Schema, Kataba.fetch_schema(embedded_url)
+    assert_requested :get, rewritten_url
+    assert_not_requested :get, embedded_url
   end
 
   # The rewrite is path-keyed, not host-keyed: any URI whose path is
   # exactly /mods/xml.xsd gets rewritten. Hosts that happen to share the
-  # path inherit the redirect — in practice only LoC publishes there.
+  # path inherit the redirect — in practice only LoC ships schemas with
+  # this import.
   def test_fetcher_rewrite_is_path_keyed_not_loc_specific
-    vanity_url    = "http://example.com/mods/xml.xsd"
-    canonical_url = "http://example.com/standards/mods/xml.xsd"
+    embedded_url  = "http://example.com/mods/xml.xsd"
+    rewritten_url = "http://example.com/standards/mods/xml.xsd"
 
-    stub_request(:get, canonical_url).to_return(status: 200, body: MINIMAL_XSD)
+    stub_request(:get, rewritten_url).to_return(status: 200, body: MINIMAL_XSD)
 
-    Kataba.fetch_schema(vanity_url)
-    assert_requested :get, canonical_url
-    assert_not_requested :get, vanity_url
+    Kataba.fetch_schema(embedded_url)
+    assert_requested :get, rewritten_url
+    assert_not_requested :get, embedded_url
   end
 
   # The rewrite must NOT fire on unrelated paths that just happen to
