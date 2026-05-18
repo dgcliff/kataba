@@ -115,7 +115,9 @@ module Kataba
         # orphaned 0-byte .part on disk — the file simply isn't created.
         fetch_uri = xsd_uri
         if !self.configuration.mirror_list.to_s.empty?
-          mirror_list = YAML.load_file(self.configuration.mirror_list)
+          # YAML.load_file returns nil for a comments-only or empty file.
+          # Treat that as "no mirror configured" rather than NoMethodError.
+          mirror_list = YAML.load_file(self.configuration.mirror_list) || {}
           mirror = mirror_list[xsd_uri]
           fetch_uri = mirror unless mirror.to_s.empty?
         end

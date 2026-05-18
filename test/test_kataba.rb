@@ -75,6 +75,16 @@ class KatabaTest < Minitest::Test
     assert_not_requested :get, MODS_URI
   end
 
+  # Regression: a mirror_list YAML with only comments (or otherwise empty)
+  # loads as nil. The loader must treat that as "no mirror configured" and
+  # fall through to the canonical URL, not NoMethodError on nil[xsd_uri].
+  def test_empty_mirror_list_falls_through_to_canonical
+    Kataba.configuration.mirror_list = "#{FIXTURE_DIR}/empty_mirror.yml"
+
+    assert_kind_of Nokogiri::XML::Schema, Kataba.fetch_schema(MODS_URI)
+    assert_requested :get, MODS_URI
+  end
+
   def test_bad_mirror_list
     mirror_list = YAML.load_file(Dir.pwd + '/test/fixtures/bad_mirror.yml')
     assert_equal BAD_MIRROR, mirror_list[MODS_URI]

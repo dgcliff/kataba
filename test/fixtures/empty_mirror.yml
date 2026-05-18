@@ -1,0 +1,2 @@
+# Intentionally has no entries — only comments. YAML.load_file returns nil
+# for this; the loader must treat it as "no mirror configured".
