@@ -61,6 +61,14 @@ module Kataba
   # Arguments:
   #   xsd_uri: (String)
 
+  # Dir.chdir is process-wide state, not thread-local: if two threads each
+  # have a chdir block open at once, Ruby raises "conflicting chdir during
+  # another chdir block" rather than let one thread's cwd stomp on the
+  # other's. A shared Mutex serializes just that step across threads in one
+  # process — cheap, since by this point it's a local file read + a Nokogiri
+  # parse, not the network fetch (which stays outside the lock).
+  CHDIR_MUTEX = Mutex.new
+
   def self.fetch_schema(xsd_uri)
     uri_md5 = Digest::MD5.hexdigest(xsd_uri)
     dir_path = "#{self.configuration.offline_storage}"
@@ -77,8 +85,10 @@ module Kataba
       end
 
       # Validate and return Nokogiri schema
-      Dir.chdir(dir_path) do
-        return Nokogiri::XML::Schema(IO.read(xsd_path))
+      CHDIR_MUTEX.synchronize do
+        Dir.chdir(dir_path) do
+          return Nokogiri::XML::Schema(IO.read(xsd_path))
+        end
       end
     rescue Nokogiri::XML::SyntaxError
       # Poisoned cache (e.g. a pre-fix install that stored a bad fetch).
